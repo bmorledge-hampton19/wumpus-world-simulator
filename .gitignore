@@ -1,0 +1,5 @@
+
+*.o
+*.pyc
+pywumpsim
+wumpsim
