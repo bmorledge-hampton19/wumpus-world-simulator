@@ -83,8 +83,8 @@ class Agent:
         if self.hasArrow and percept.stench: self.hasArrow = False; return Action.SHOOT
 
         # Otherwise, choose a random movement/rotation action.
-        return [self.turnLeft, self.turnRight, self.moveForward][random.randrange(3)]()
+        return random.choice([self.turnLeft, self.turnRight, self.moveForward])()
 
-    
+
     def GameOver(self, score):
         pass
