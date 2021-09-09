@@ -1,6 +1,5 @@
 # Agent.py
 
-from mmap import ACCESS_COPY
 from Percept import Percept
 import Action, random
 
