@@ -1,10 +1,10 @@
 # Makefile
 
 CC = c++
-OBJECTS = Action.o Agent.o Location.o Orientation.o Percept.o WumpusWorld.o
+OBJECTS = Action.o Agent.o Location.o Orientation.o Percept.o WumpusWorld.o Search.o
 
 PYTHON-DEF = -DPYTHON
-PYTHON-OBJ = Action.o PyAgent.o Location.o Orientation.o Percept.o WumpusWorld.o
+PYTHON-OBJ = Action.o PyAgent.o Location.o Orientation.o Percept.o WumpusWorld.o Search.o
 
 #PYTHON_CONFIG = python2-config # Python 2
 PYTHON_CONFIG = python3-config --embed # Python 3
@@ -51,6 +51,9 @@ Percept.o: Percept.h Percept.cc
 
 WumpusWorld.o: WumpusWorld.h WumpusWorld.cc
 	$(CC) -c WumpusWorld.cc
+
+Search.o: Search.h Search.cc
+	$(CC) -c Search.cc
 
 clean:
 	rm -rf *.o *.pyc __pycache__ wumpsim pywumpsim

@@ -1,9 +1,16 @@
 // Agent.cc
+//
+// This code works only for the testworld that comes with the simulator.
 
 #include <iostream>
+#include <list>
 #include "Agent.h"
 
 using namespace std;
+
+int MySearchEngine::HeuristicFunction(SearchState* state, SearchState* goalState) {
+	return 0; // not a good heuristic
+}
 
 Agent::Agent ()
 {
@@ -17,37 +24,44 @@ Agent::~Agent ()
 
 void Agent::Initialize ()
 {
+	// Works only for test world.
+	// You won't initially know safe locations or world size.
+	for (int x = 1; x <= 4; x++) {
+		for (int y = 1; y <= 4; y++) {
+			searchEngine.AddSafeLocation(x,y);
+		}
+	}
+	searchEngine.RemoveSafeLocation(1,3); // wumpus
+	searchEngine.RemoveSafeLocation(3,1); // pit
+	searchEngine.RemoveSafeLocation(3,3); // pit
+	searchEngine.RemoveSafeLocation(4,4); // pit
 
+	agentHasGold = false;
+	actionList.clear();
 }
 
 Action Agent::Process (Percept& percept)
 {
-	char c;
-	Action action;
-	bool validAction = false;
+	list<Action> actionList2;
+	if (actionList.empty()) {
 
-	while (! validAction)
-	{
-		validAction = true;
-		cout << "Action? ";
-		cin >> c;
-		if (c == 'f') {
-			action = GOFORWARD;
-		} else if (c == 'l') {
-			action = TURNLEFT;
-		} else if (c == 'r') {
-			action = TURNRIGHT;
-		} else if (c == 'g') {
-			action = GRAB;
-		} else if (c == 's') {
-			action = SHOOT;
-		} else if (c == 'c') {
-			action = CLIMB;
+		// Works only for test world (you won't initially know gold location)
+		if (! agentHasGold) {
+			// Goto (2,3) and GRAB
+			actionList2 = searchEngine.FindPath(Location(1,1), RIGHT, Location(2,3), RIGHT);
+			actionList.splice(actionList.end(), actionList2);
+			actionList.push_back(GRAB);
+			agentHasGold = true;
 		} else {
-			cout << "Huh?" << endl;
-			validAction = false;
+			// Goto (1,1) and CLIMB
+			actionList2 = searchEngine.FindPath(Location(2,3), RIGHT, Location(1,1), RIGHT);
+			actionList.splice(actionList.end(), actionList2);
+			actionList.push_back(CLIMB);
 		}
+
 	}
+	Action action = actionList.front();
+	actionList.pop_front();
 	return action;
 }
 
@@ -55,4 +69,5 @@ void Agent::GameOver (int score)
 {
 
 }
+
 
