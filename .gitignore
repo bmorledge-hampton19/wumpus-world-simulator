@@ -3,3 +3,4 @@
 *.pyc
 pywumpsim
 wumpsim
+Agent.py
