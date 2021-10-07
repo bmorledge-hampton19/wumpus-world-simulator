@@ -20,6 +20,10 @@ class Agent:
         self.location = [1,1] # A two-item list representing the x and y coordinates of the agent's position.
         self.searchEngine = MySearchEngine()
         self.goldLocation = None # The location of the gold.  NoneType if unknown.
+
+        # Dictionary to convert action objects to the related function.
+        self.actionToFunction = {Action.TURNRIGHT:self.turnRight, Action.TURNLEFT:self.turnLeft, 
+                                 Action.GOFORWARD:self.moveForward}
     
         # Create a dictionary to map orientations to their effect on position.
         self.orientationMovementTransform = {Orientation.UP:[0,1], Orientation.RIGHT:[1,0],
@@ -35,26 +39,20 @@ class Agent:
         self.worldSize = 9
 
         # Create a set of locations which have already been visited.
-        # Add the starting location to this dictionary
         self.visitedLocations = set()
-        self.visitedLocations.add((1,1))
 
         # Create a set of locations that are known to be safe
-        # Add the starting location as a safe location.
         self.knownSafeLocations = set()
-        self.knownSafeLocations.add((1,1))
-
-        # Also let the search engine know that the starting point is safe.
-        self.searchEngine.AddSafeLocation(1,1)
-
-        # Create a set of locations that are known to be unsafe
-        self.knownUnsafeLocations = set()
 
         # Create a set of locations that are adjacent to visited locations but have yet to be visited.
-        # Add the 2 spaces adjacent to the starting location as spaces to visit.
+        # Also, add the starting location here as, well, a starting point!
         self.locationsToVisit = set()
-        self.locationsToVisit.add((1,2))
-        self.locationsToVisit.add((2,1))
+        self.locationsToVisit.add((1,1))
+
+        for x in range(1,10):
+            for y in range(1,10):
+                pass
+                #self.searchEngine.AddSafeLocation(x,y)
 
 
     def __del__(self):
@@ -65,13 +63,14 @@ class Agent:
         # Check the agent's location.  If it is not [1,1], then the agent encountered an unsafe spot at the end of the
         # last try.  Update the agent's knowledge accordingly.  Then, reset the location to [1,1]
         if self.location != [1,1]:
+            print("Agent met its demise at:",self.location,'\n')
             self.locationsToVisit.remove(tuple(self.location))
-            self.knownUnsafeLocations.add(tuple(self.location))
+            self.visitedLocations.add(tuple(self.location))
             self.searchEngine.RemoveSafeLocation(self.location[0],self.location[1])
             self.location = [1,1]
 
         self.orientation = Orientation.RIGHT # The agent's current orientation.
-        self.agentHasGold = False # Whether or not the agent has the gold
+        self.hasGold = False # Whether or not the agent has the gold
         self.actionList = [] # The list of actions (Movement or turning ONLY) the agent is planning on making.
     
 
@@ -114,6 +113,11 @@ class Agent:
     # Input percept is a dictionary [perceptName: boolean]
     def Process (self, percept: Percept):
 
+        print("Agent is at:",self.location)
+
+        # First thing's first: If we have gold and are at the exit, get out of there!
+        if self.hasGold and self.location == [1,1]: return Action.CLIMB
+
         # Did the agent bump?  If so, we now know the world size and should reset our position
         # and update our unvisited locations and actionList to make sure we don't try to go out of bounds again.
         if percept.bump:
@@ -125,44 +129,69 @@ class Agent:
         # Check to see if this is a new location.  If it is, we have some new knowledge about the world!
         if not tuple(self.location) in self.visitedLocations:
             
+            # Clear out the current action, as it should only contain rotation actions now anyway.
+            self.actionList.clear()
+
             # This space has now been visited and is known to be safe.
             self.visitedLocations.add(tuple(self.location))
+            self.searchEngine.AddSafeLocation(self.location[0],self.location[1])
             self.locationsToVisit.remove(tuple(self.location))
             self.knownSafeLocations.add(tuple(self.location))
 
+            # Determine which adjacent spaces are actually valid.
+            adjacentLocations = list()
+            for x,y in ((-1,0),(1,0),(0,-1),(0,1)):
+                location = (self.location[0]+x,self.location[1]+y)
+                if min(location) > 0 and max(location) <= self.worldSize:
+                    adjacentLocations.append(location)
+
             # If there is no breeze or stench, all adjacent spaces are safe too!
             if not percept.stench and not percept.breeze:
-                for x in (-1,1):
-                    for y in (-1,1):
-                        self.knownSafeLocations.add((self.location[0]+x,self.location+y))
+                for location in adjacentLocations: self.knownSafeLocations.add(location)
 
             # Check for any unvisited adjacent locations and mark them to be visited.
-            for x in (-1,1):
-                for y in (-1,1):
-                    location = (self.location[0]+x,self.location+y)
-                    if not location in self.visitedLocations: self.locationsToVisit.add(location)
+            for location in adjacentLocations:
+                if not location in self.visitedLocations: self.locationsToVisit.add(location)
 
-        # Did the agent perceive a glitter?  If so, grab it!.
+        # Did the agent perceive a glitter?  If so, grab it, and plan to go back to [1,1]
         # Also, update the known gold position.
         if percept.glitter:
-            self.actionList.clear()
-            self.agentHasGold = True
+            print("Found gold! Routing back to [1,1]")
+            self.actionList = self.searchEngine.FindPath(self.location, self.orientation, [1,1], Orientation.LEFT)
+            self.hasGold = True
             self.goldLocation = self.location
             return Action.GRAB
 
-        # Do we have the gold and 
+        # If there are not actions planned at the moment, we need to choose a location to travel to.
+        if not self.actionList:
 
-        if (not self.actionList):
-            if (not self.agentHasGold):
-                self.actionList += self.searchEngine.FindPath([1,1], Orientation.RIGHT, [2,3], Orientation.RIGHT)
-                self.actionList.append(Action.GRAB)
-                self.agentHasGold = True
+            # If we know the location of the gold, go there!
+            if self.goldLocation is not None:
+                print("Routing to gold at",self.goldLocation)
+                self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
+                                                             self.goldLocation, Orientation.RIGHT)
+
+            # Otherwise, check for areas marked for exploration that are guaranteed to be safe.
             else:
-                self.actionList += self.searchEngine.FindPath([2,3], Orientation.RIGHT, [1,1], Orientation.RIGHT)
-                self.actionList.append(Action.CLIMB)
-        action = self.actionList.pop(0)
+                for location in self.locationsToVisit:
+                    if location in self.knownSafeLocations:
+                        print("Routing to",location)
+                        self.searchEngine.AddSafeLocation(location[0],location[1])
+                        self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
+                                                                     list(location), Orientation.RIGHT)
+                        break
+            
+                # If we still haven't decided on a location, just pick one that needs to be visited!
+                if not self.actionList: 
+                    location = tuple(self.locationsToVisit)[0]
+                    print("Routing to",location)
+                    self.searchEngine.AddSafeLocation(location[0],location[1])
+                    self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
+                                                                 list(location), Orientation.RIGHT)
 
-        return action
+        # If we've reached this point, we should have a list of movement actions to work with.  Pop one off and handle it!
+        action = self.actionList.pop(0)
+        return self.actionToFunction[action]()
     
     def GameOver(self, score):
         pass
