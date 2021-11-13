@@ -14,11 +14,9 @@ class MySearchEngine(Search.SearchEngine):
     
 class Agent:
     def __init__(self):
-        # These two lines are already in Initialize(), so are they unnecessary?
-        #self.agentHasGold = False
-        #self.actionList = []
+
         self.location = [1,1] # A two-item list representing the x and y coordinates of the agent's position.
-        self.searchEngine = MySearchEngine()
+        self.searchEngine = MySearchEngine() # Initialize the search engine.
         self.goldLocation = None # The location of the gold.  NoneType if unknown.
 
         # Dictionary to convert action objects to the related function.
@@ -43,6 +41,13 @@ class Agent:
 
         # Create a set of locations that are known to be safe
         self.knownSafeLocations = set()
+
+        # Create a set of locations which have stenches
+        self.stenchLocations = set()
+
+        # Create a variable to keep track of the wumpus location.
+        # An unknown wumpus location is represented by "None"
+        self.wumpusLocation = None
 
         # Create a set of locations that are adjacent to visited locations but have yet to be visited.
         # Also, add the starting location here as, well, a starting point!
@@ -71,7 +76,8 @@ class Agent:
 
         self.orientation = Orientation.RIGHT # The agent's current orientation.
         self.hasGold = False # Whether or not the agent has the gold
-        self.actionList = [] # The list of actions (Movement or turning ONLY) the agent is planning on making.
+        self.actionList = list() # The list of actions (Movement or turning ONLY) the agent is planning on making.
+        self.isWumpusAlive = True # Whether or not the wumpus is still alive.
     
 
     def turnRight(self):
@@ -101,13 +107,34 @@ class Agent:
         """
 
         # Perform the forward movement based on current orientation.
-        positionTransform = self.orientationMovementTransform[self.orientation]
-        self.location = [self.location[0] + positionTransform[0], self.location[1] + positionTransform[1]]
+        self.location = self.getMovementResult()
 
         # Agent should never try to move into an x or y position of 0
         assert self.location[0] > 0 and self.location[1] > 0, "Attempted to move out of bounds at bottom or left border."
 
         return Action.GOFORWARD
+
+
+    def getMovementResult(self):
+        """
+        Returns the location of the agent if they were to move forward.
+        """
+        positionTransform = self.orientationMovementTransform[self.orientation]
+        return [self.location[0] + positionTransform[0], self.location[1] + positionTransform[1]]
+
+
+    def getValidAdjacentLocations(self, location):
+        """
+        Returns a list of all locations adjacent to the given location that aren't out of bounds.
+        """
+        adjacentLocations = list()
+        for x,y in ((-1,0),(1,0),(0,-1),(0,1)):
+            adjacentLocation = (location[0]+x,location[1]+y)
+            if min(adjacentLocation) > 0 and max(adjacentLocation) <= self.worldSize:
+                adjacentLocations.append(adjacentLocation)
+
+        return adjacentLocations
+
 
 
     # Input percept is a dictionary [perceptName: boolean]
@@ -126,6 +153,9 @@ class Agent:
             self.locationsToVisit = {location for location in self.locationsToVisit if max(location) <= self.worldSize}
             self.actionList.clear()
 
+        # Did we hear a scream?  If so, the wumpus is dead!
+        if percept.scream: self.isWumpusAlive = False
+
         # Check to see if this is a new location.  If it is, we have some new knowledge about the world!
         if not tuple(self.location) in self.visitedLocations:
             
@@ -139,15 +169,15 @@ class Agent:
             self.knownSafeLocations.add(tuple(self.location))
 
             # Determine which adjacent spaces are actually valid.
-            adjacentLocations = list()
-            for x,y in ((-1,0),(1,0),(0,-1),(0,1)):
-                location = (self.location[0]+x,self.location[1]+y)
-                if min(location) > 0 and max(location) <= self.worldSize:
-                    adjacentLocations.append(location)
+            adjacentLocations = self.getValidAdjacentLocations(self.location)
 
             # If there is no breeze or stench, all adjacent spaces are safe too!
-            if not percept.stench and not percept.breeze:
+            # Don't forget about the edge case where perceiving a stench while on top of the wumpus's corpse doesn't indicate adjacent danger.
+            if not percept.breeze and (not percept.stench or tuple(self.location) == self.wumpusLocation):
                 for location in adjacentLocations: self.knownSafeLocations.add(location)
+
+            # Otherwise, if there is a stench, add it to the set of known stench locations.
+            elif percept.stench: self.stenchLocations.add(tuple(self.location))
 
             # Check for any unvisited adjacent locations and mark them to be visited.
             for location in adjacentLocations:
@@ -158,6 +188,7 @@ class Agent:
         if percept.glitter:
             print("Found gold! Routing back to [1,1]")
             self.actionList = self.searchEngine.FindPath(self.location, self.orientation, [1,1], Orientation.LEFT)
+            self.actionList.reverse()
             self.hasGold = True
             self.goldLocation = self.location
             return Action.GRAB
@@ -175,22 +206,54 @@ class Agent:
             else:
                 for location in self.locationsToVisit:
                     if location in self.knownSafeLocations:
-                        print("Routing to",location)
+                        print("Routing to known safe location at",location)
                         self.searchEngine.AddSafeLocation(location[0],location[1])
                         self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
                                                                      list(location), Orientation.RIGHT)
                         break
             
-                # If we still haven't decided on a location, just pick one that needs to be visited!
-                if not self.actionList: 
-                    location = tuple(self.locationsToVisit)[0]
-                    print("Routing to",location)
-                    self.searchEngine.AddSafeLocation(location[0],location[1])
-                    self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
-                                                                 list(location), Orientation.RIGHT)
+                # If there aren't any known safe locations, can we kill the wumpus to establish a new safe location?
+                if not self.actionList:
+
+                    # (First, check to see if we actually know the wumpus's location or can determine it.)
+                    if self.wumpusLocation is None:
+                        for stenchLocation1 in self.stenchLocations:
+                            for stenchLocation2 in self.stenchLocations:
+
+                                # Can we find a pair of diagonal stenches?
+                                if abs(stenchLocation1[0]-stenchLocation2[0]) == 1 and abs(stenchLocation1[1]-stenchLocation2[1]) == 1:
+                                    # Is one of the spaces between the diagonals known to be safe?  If so, the wumpus must be in the other space!
+                                    if (stenchLocation1[0],stenchLocation2[1]) in self.knownSafeLocations:
+                                        self.wumpusLocation = (stenchLocation2[0],stenchLocation1[1])
+                                    elif (stenchLocation2[0],stenchLocation1[1]) in self.knownSafeLocations:
+                                        self.wumpusLocation  = (stenchLocation1[0],stenchLocation2[1])
+
+                    # If we know the wumpus location now and haven't been there before, route to it!
+                    if self.wumpusLocation is not None and not self.wumpusLocation in self.visitedLocations:
+                        print("Routing to wumpus at",self.wumpusLocation)
+                        self.searchEngine.AddSafeLocation(self.wumpusLocation[0],self.wumpusLocation[1])
+                        self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
+                                                                    list(self.wumpusLocation), Orientation.RIGHT)
+
+                    # If we still haven't decided on a location, just pick one that needs to be visited!
+                    else: 
+                        location = tuple(self.locationsToVisit)[0]
+                        print("Routing to possibly safe location at",location)
+                        self.searchEngine.AddSafeLocation(location[0],location[1])
+                        self.actionList = self.searchEngine.FindPath(self.location, self.orientation, 
+                                                                    list(location), Orientation.RIGHT)
+
+            # Reverse the action list so we can pop items off the end, which is more efficient.
+            self.actionList.reverse()
+
+        # If we have information about the wumpus, make sure we aren't about to run into him!
+        # If we are, it means we plotted a path to or through him and we need to shoot him first.
+        if (self.wumpusLocation is not None and self.isWumpusAlive and 
+            self.actionList[-1] == Action.GOFORWARD and tuple(self.getMovementResult()) == self.wumpusLocation):
+            return Action.SHOOT
 
         # If we've reached this point, we should have a list of movement actions to work with.  Pop one off and handle it!
-        action = self.actionList.pop(0)
+        action = self.actionList.pop()
         return self.actionToFunction[action]()
     
     def GameOver(self, score):
